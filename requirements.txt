@@ -1,0 +1,13 @@
+streamlit
+chromadb
+sentence-transformers
+google-generativeai
+pandas
+numpy
+uuid
+argparse
+python-dotenv
+
+langchain
+langchain-google-genai
+google-genai
