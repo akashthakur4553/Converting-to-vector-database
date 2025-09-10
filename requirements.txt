@@ -8,7 +8,7 @@ uuid
 pysqlite3-binary
 argparse
 python-dotenv
-streamlit-chromadb-connection
-langchain
+
+
 langchain-google-genai
 google-genai

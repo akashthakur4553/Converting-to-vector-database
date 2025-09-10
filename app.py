@@ -1,9 +1,8 @@
 import streamlit as st
-from streamlit_chromadb_connection.chromadb_connection import ChromadbConnection
+import chromadb
 from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
 
-# Try to import grounding modules
 GROUNDING_AVAILABLE = False
 try:
     from google.genai import types as genai_types, Client as GenaiClient
@@ -17,22 +16,13 @@ import pandas as pd
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
-# Get API key from environment variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 class RAGChatbot:
     def __init__(self, db_path: str = "./chroma_db", gemini_api_key: Optional[str] = None):
-        # Updated ChromaDB connection using streamlit_chromadb_connection
-        configuration = {
-            "client": "PersistentClient",
-            "path": db_path
-        }
-        self.conn = st.connection("chromadb", type=ChromadbConnection, **configuration)
-        self.client = self.conn._instance  # Access the underlying ChromaDB client
-        
+        self.client = chromadb.PersistentClient(path=db_path)
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
         
         api_key = gemini_api_key or GEMINI_API_KEY
@@ -42,7 +32,6 @@ class RAGChatbot:
         else:
             self.llm = None
         
-        # Initialize grounding client if available
         self.grounding_client = None
         self.grounding_available = GROUNDING_AVAILABLE
         if GROUNDING_AVAILABLE and api_key:
@@ -80,12 +69,9 @@ class RAGChatbot:
             try:
                 if self.llm:
                     translation_prompt = f"""
-                    Translate the following text to English for search purposes.
-                    IMPORTANT: Output ONLY the translation without any explanations, prefixes, or additional text.
-                    
+
                     Text to translate: {query}
-                    
-                    English translation:
+
                     """
                     translation_response = self.llm.generate_content(translation_prompt)
                     search_query = translation_response.text.strip() if translation_response.text else query
@@ -123,24 +109,19 @@ class RAGChatbot:
             return []
     
     def generate_response_with_grounding(self, query: str) -> str:
-        """Generate a response using Google Search grounding for external queries"""
         if not self.llm:
             return "Gemini API key not configured properly. Please set your API key in the code to query the dataset."
         
-        # If grounding is available, use it
         if self.grounding_available and self.grounding_client and genai_types:
             try:
-                # Define the grounding tool
                 grounding_tool = genai_types.Tool(
                     google_search=genai_types.GoogleSearch()
                 )
                 
-                # Configure generation settings with grounding tool
                 config = genai_types.GenerateContentConfig(
                     tools=[grounding_tool]
                 )
                 
-                # Generate grounded response
                 response = self.grounding_client.models.generate_content(
                     model="gemini-2.0-flash",
                     contents=query,
@@ -150,20 +131,11 @@ class RAGChatbot:
             except Exception as e:
                 st.warning(f"Grounding failed, falling back to standard generation: {e}")
         
-        # Fallback to standard generation if grounding is not available or fails
         try:
-            # For grounding, we'll use a simpler prompt that allows the model to search externally
             prompt = f"""
-            You are an intelligent assistant that can access current information from the web.
-            
-            INSTRUCTIONS:
-            1. First, analyze the language of the user's question and respond in EXACTLY the same language
-            2. Provide a comprehensive answer to the question using up-to-date information
-            3. If you use information from the web search, clearly indicate it
-            4. If you cannot find relevant information, say so politely
-            
+
             QUESTION (respond in the same language): {query}
-            
+
             YOUR RESPONSE (in the same language as the question):
             """
             
@@ -173,14 +145,11 @@ class RAGChatbot:
             return f"Error generating grounded response: {e}"
     
     def is_external_query_needed(self, query: str, context_docs: List[Dict]) -> bool:
-        """Determine if an external query is needed based on the context documents and query"""
-        # If no context documents found, we likely need external information
         if not context_docs:
             return True
             
-        # Check if the query is asking about current/real-time information
         external_indicators = [
-            "current", "today", "now", "latest", "recent", "stores near", 
+            "current", "today", "now", "latest", "stores near", 
             "weather", "news", "price", "availability", "location", "where can i buy",
             "open now", "working hours", "contact", "phone number", "address",
             "near me", "closest", "nearest"
@@ -191,17 +160,14 @@ class RAGChatbot:
             if indicator in query_lower:
                 return True
                 
-        # If the context documents have high distances (low similarity), we might need external info
         if context_docs and len(context_docs) > 0:
             avg_distance = sum(doc['distance'] for doc in context_docs) / len(context_docs)
-            # If average distance is high (low similarity), consider it
-            if avg_distance > 0.7:  # Threshold for similarity
+            if avg_distance > 0.7:
                 return True
                 
         return False
     
     def generate_response(self, query: str, context_docs: List[Dict]) -> str:
-        # Check if we need to use external information
         if self.is_external_query_needed(query, context_docs):
             st.info("🔄 Query requires external information. Searching the web...")
             return self.generate_response_with_grounding(query)
@@ -214,21 +180,12 @@ class RAGChatbot:
             context += f"Document {i+1}:\n{doc['document']}\n\n"
         
         prompt = f"""
-        You are an intelligent assistant that answers questions based on provided context documents.
-        
-        INSTRUCTIONS:
-        1. First, analyze the language of the user's question and respond in EXACTLY the same language
-        2. Use information from the context documents below as your primary source
-        3. If the context documents don't contain relevant information, you may use general knowledge
-        4. When using context documents, clearly indicate it with phrases like "Based on the provided information..."
-        5. When using general knowledge, clearly indicate it with phrases like "Based on general knowledge..."
-        6. If you cannot answer the question with the given context or general knowledge, say so politely
-        
+
         CONTEXT DOCUMENTS:
         {context}
-        
+
         USER QUESTION (respond in the same language): {query}
-        
+
         YOUR RESPONSE (in the same language as the question):
         """
         
