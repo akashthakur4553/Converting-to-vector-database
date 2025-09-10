@@ -5,6 +5,7 @@ google-generativeai
 pandas
 numpy
 uuid
+pysqlite3-binary
 argparse
 python-dotenv
 streamlit-chromadb-connection
